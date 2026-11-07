@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background Circle Radial Gradient -->
+    <radialGradient id="bgGrad" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#dc2626"/>
+      <stop offset="45%" stop-color="#b91c1c"/>
+      <stop offset="85%" stop-color="#7f1d1d"/>
+      <stop offset="100%" stop-color="#450a0a"/>
+    </radialGradient>
+
+    <!-- Bevel & Edge Glow for Badge -->
+    <linearGradient id="edgeGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.4)"/>
+      <stop offset="50%" stop-color="rgba(255,255,255,0.05)"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,0.6)"/>
+    </linearGradient>
+
+    <!-- Electric Cyan Lightning Gradient -->
+    <linearGradient id="boltGrad" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="25%" stop-color="#a5f3fc"/>
+      <stop offset="60%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <!-- Deep 3D Bevel for Bolt -->
+    <linearGradient id="boltBevel" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+
+    <!-- Shadow filter for 3D extrusion -->
+    <filter id="boltShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="-12" dy="28" stdDeviation="22" flood-color="#1e0202" flood-opacity="0.95"/>
+      <feDropShadow dx="-4" dy="12" stdDeviation="10" flood-color="#38bdf8" flood-opacity="0.35"/>
+    </filter>
+
+    <!-- Neon Glow Filter -->
+    <filter id="neonGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="36" result="blur1"/>
+      <feGaussianBlur stdDeviation="16" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Circular Badge Base -->
+  <circle cx="512" cy="512" r="460" fill="url(#bgGrad)"/>
+  <circle cx="512" cy="512" r="460" fill="none" stroke="url(#edgeGlow)" stroke-width="8"/>
+
+  <!-- Subtle Texture/Inner Ring -->
+  <circle cx="512" cy="512" r="448" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="4"/>
+
+  <!-- JX-Monogram Stylized Lightning Bolt (Matching JXRouter angle and proportions) -->
+  <g filter="url(#boltShadow)">
+    <!-- Base 3D extrusion body -->
+    <!-- Lower left J hook element -->
+    <path d="M 220 520 L 340 520 L 260 710 L 220 710 Z" fill="#0284c7" opacity="0.6"/>
+    <path d="M 220 520 L 330 520 L 250 700 L 220 700 Z" fill="url(#boltGrad)"/>
+    
+    <!-- Dynamic Lightning Bolt K / Main Diagonal Slashes -->
+    <!-- Upper Hook & Main Slant -->
+    <path d="M 400 320 L 590 320 L 460 520 L 610 520 L 340 800 L 420 570 L 280 570 Z" 
+          fill="url(#boltGrad)" stroke="rgba(255,255,255,0.85)" stroke-width="6" stroke-linejoin="round"/>
+
+    <!-- Sharp High-Energy Trailing Branch -->
+    <path d="M 520 480 L 800 290 L 830 310 L 640 540 L 760 720 L 660 720 L 560 570 Z" 
+          fill="url(#boltGrad)" stroke="rgba(255,255,255,0.85)" stroke-width="6" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Specular Highlights & Glint -->
+  <path d="M 405 325 L 580 325 L 458 515 L 400 480 Z" fill="#ffffff" opacity="0.6"/>
+  <path d="M 800 295 L 825 312 L 645 530 Z" fill="#ffffff" opacity="0.75"/>
+</svg>

@@ -104,6 +104,17 @@ export class UniversalGateway {
 
         const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
 
+        // API Endpoint: Serve JXEngine App Icon
+        if (url.pathname === "/api/icon" || url.pathname === "/favicon.ico") {
+          const iconPath = join(__dirname, "..", "icon.png");
+          if (existsSync(iconPath)) {
+            const buf = readFileSync(iconPath);
+            res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" });
+            res.end(buf);
+            return;
+          }
+        }
+
         // API Endpoint: History query & export
         if (url.pathname === "/api/history") {
           const sessionId = url.searchParams.get("sessionId") || "default";
