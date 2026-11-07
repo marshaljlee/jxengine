@@ -16,7 +16,7 @@
     "./bridge": "./dist/bridge.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/panel.html dist/panel.html",
     "test": "node --test tests/*.test.js",
     "start": "node bin/jxengine.js serve"
   },

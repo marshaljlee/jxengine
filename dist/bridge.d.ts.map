@@ -1,1 +1,0 @@
-{"version":3,"file":"bridge.d.ts","sourceRoot":"","sources":["../src/bridge.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,wBAAwB,EAAwB,MAAM,cAAc,CAAC;AAI9E,MAAM,WAAW,aAAa;IAC5B,SAAS,EAAE,MAAM,EAAE,CAAC;IACpB,YAAY,EAAE,wBAAwB,CAAC;CACxC;AAED,wBAAgB,gBAAgB,CAAC,GAAG,EAAE,aAAa,QA2ElD"}

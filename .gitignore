@@ -1,2 +1,15 @@
+# Dependencies
 node_modules/
+
+# Build outputs
+dist/
+
+# OS and system files
 .DS_Store
+Thumbs.db
+*.log
+
+# Internal agent pipeline & scratch metadata
+.pipeline/
+.brud/
+*.tsbuildinfo
