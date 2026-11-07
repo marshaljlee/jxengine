@@ -198,6 +198,10 @@
           <div id="ramGauge" class="gauge-fill"></div>
         </div>
       </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <span style="font-size: 11px; color: var(--ink-soft);">Cache / Inactive RAM:</span>
+        <button id="freeRamBtn" class="btn sm" onclick="freeRam()" style="padding: 3px 8px; font-size: 10.5px;">Free RAM</button>
+      </div>
       <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-soft); padding: 2px 0;">
         <span>CPU Performance Cores:</span>
         <b id="cpuCoresText" style="color: var(--ink);">-</b>
@@ -239,6 +243,7 @@
         <span>Native Context: <b id="detCtx" style="color: var(--ink);">-</b></span>
         <span>Vision Projector: <b id="detProj" style="color: var(--ink);">None</b></span>
       </div>
+      <div id="reservationStatus" style="font-size: 11px; margin-top: 6px; padding: 6px 10px; border-radius: 4px; background: var(--surface-raised); border: 1px solid var(--stroke); display: none;"></div>
     </div>
 
     <!-- Hardware-Tuned Engine Parameters -->
@@ -435,15 +440,61 @@
     await updateStatus();
   }
 
-  function onModelSelected() {
+  async function onModelSelected() {
     const sel = document.getElementById("modelSelect");
     const modelId = sel.value;
     const found = cachedModels.find(m => m.id === modelId);
     if (found) {
       document.getElementById("modelFormatBadge").textContent = found.owned_by ? found.owned_by.toUpperCase() : "-";
       document.getElementById("detArch").textContent = found.owned_by || "-";
+      checkReservation(found.size || 0);
     }
     renderControlState();
+  }
+
+  async function checkReservation(sizeBytes) {
+    const resBox = document.getElementById("reservationStatus");
+    const ctx = parseInt(document.getElementById("ctx").value, 10) || 4096;
+    try {
+      const res = await fetch("/api/memory/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sizeBytes, nCtx: ctx }),
+      });
+      const data = await res.json();
+      resBox.style.display = "block";
+      if (data.sufficient) {
+        resBox.style.color = "#3fb950";
+        resBox.innerHTML = `✓ RAM Reserved: Model requires ~${data.requiredGb} GB (${data.availableGb} GB available). Safe to load.`;
+      } else {
+        resBox.style.color = "#f85149";
+        resBox.innerHTML = `⚠ Deficit: Requires ~${data.requiredGb} GB but only ${data.availableGb} GB is free (Deficit: ${data.deficitGb} GB). Click 'Free RAM' first.`;
+      }
+    } catch {
+      resBox.style.display = "none";
+    }
+  }
+
+  async function freeRam() {
+    const btn = document.getElementById("freeRamBtn");
+    btn.disabled = true;
+    btn.textContent = "Freeing...";
+    try {
+      const res = await fetch("/api/memory/free", { method: "POST" });
+      const data = await res.json();
+      btn.textContent = `Freed ${data.freedMb} MB!`;
+      await updateDoctor();
+      const sel = document.getElementById("modelSelect");
+      const found = cachedModels.find(m => m.id === sel.value);
+      if (found) checkReservation(found.size || 0);
+    } catch {
+      btn.textContent = "Error";
+    } finally {
+      setTimeout(() => {
+        btn.textContent = "Free RAM";
+        btn.disabled = false;
+      }, 2000);
+    }
   }
 
   async function toggleModel() {

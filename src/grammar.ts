@@ -133,3 +133,4 @@ root ::= ${toolChoices}
 ws ::= [ \\t\\n\\r]*
 `.trim() + "\n\n" + toolRules.join("\n\n");
 }
+

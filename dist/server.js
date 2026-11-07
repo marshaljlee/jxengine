@@ -16,6 +16,7 @@ import { compactConversation } from "./compactor.js";
 import { getDynamicStopTokens, truncateHallucinatedObservation } from "./interceptor.js";
 import { isolateHistoricalScratchpads } from "./scratchpad.js";
 import { SlotManager } from "./slots.js";
+import { freeSystemRam, checkMemoryReservation } from "./memory.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export class UniversalGateway {
     config;
@@ -48,6 +49,30 @@ export class UniversalGateway {
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify(diag));
                     return;
+                }
+                // API Endpoint: Free RAM safely (releases inactive caches without killing active models)
+                if (url.pathname === "/api/memory/free" && req.method === "POST") {
+                    const result = freeSystemRam();
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+                // API Endpoint: Memory reservation preflight check
+                if (url.pathname === "/api/memory/check" && req.method === "POST") {
+                    try {
+                        const body = await this.readJsonBody(req);
+                        const modelSizeBytes = body.sizeBytes || 0;
+                        const contextTokens = body.nCtx || 4096;
+                        const reservation = checkMemoryReservation(modelSizeBytes, contextTokens);
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(reservation));
+                        return;
+                    }
+                    catch (err) {
+                        res.writeHead(400, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: err?.message }));
+                        return;
+                    }
                 }
                 // Health check
                 if (url.pathname === "/health" || url.pathname === "/api/version") {
@@ -148,6 +173,21 @@ export class UniversalGateway {
                             return;
                         }
                         const opts = autoConfigureModel(found, undefined, overrides);
+                        // Memory reservation check: Ensure model fits available RAM before launching
+                        const memCheck = checkMemoryReservation(found.sizeBytes || 0, opts.nCtx || 4096);
+                        if (!memCheck.sufficient) {
+                            // Attempt to free RAM first
+                            freeSystemRam();
+                            const recheck = checkMemoryReservation(found.sizeBytes || 0, opts.nCtx || 4096);
+                            if (!recheck.sufficient && !overrides.forceLoad) {
+                                res.writeHead(400, { "Content-Type": "application/json" });
+                                res.end(JSON.stringify({
+                                    error: `Insufficient RAM reservation. Requires ~${recheck.requiredGb} GB, but only ${recheck.availableGb} GB is currently available. Free up memory or reduce context length.`,
+                                    memoryCheck: recheck,
+                                }));
+                                return;
+                            }
+                        }
                         const instance = await this.config.orchestrator.launchModel(found, opts);
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify({ status: "ready", port: instance.port, backend: instance.backend, options: opts }));

@@ -76,3 +76,4 @@ test("Feature 7: SlotManager handles slot abort call without throwing", async ()
   const res = await SlotManager.abortSlot(99999, 0);
   assert.equal(typeof res, "boolean");
 });
+
