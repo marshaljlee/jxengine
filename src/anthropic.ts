@@ -3,6 +3,7 @@ import { sanitizeModelResponse } from "./hygiene.js";
 import { applyInstructionGuardrails } from "./guardrails.js";
 import { humanizeOutput } from "./humanizer.js";
 import { normalizeVisionInput } from "./vision.js";
+import { repairAndParseJson } from "./repair.js";
 
 export interface AnthropicMessage {
   role: "user" | "assistant";
@@ -147,12 +148,17 @@ export function openAiToAnthropic(res: Record<string, any>, modelName: string): 
   if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
     for (const tc of msg.tool_calls) {
       let args = {};
-      try {
-        args = typeof tc.function?.arguments === "string" ? JSON.parse(tc.function.arguments) : tc.function?.arguments;
-      } catch {}
+      if (typeof tc.function?.arguments === "string") {
+        const repaired = repairAndParseJson(tc.function.arguments);
+        args = repaired.success && repaired.data ? repaired.data : {};
+      } else if (typeof tc.function?.arguments === "object" && tc.function?.arguments !== null) {
+        args = tc.function.arguments;
+      }
+      const rawId = tc.id || `toolu_${Date.now()}`;
+      const toolId = rawId.startsWith("toolu_") ? rawId : `toolu_${rawId}`;
       contentBlocks.push({
         type: "tool_use",
-        id: tc.id || `toolu_${Date.now()}`,
+        id: toolId,
         name: tc.function?.name,
         input: args,
       });
@@ -161,9 +167,11 @@ export function openAiToAnthropic(res: Record<string, any>, modelName: string): 
 
   // Add intercepted textual tool calls
   for (const c of calls) {
+    const rawId = c.id || `toolu_${Date.now()}`;
+    const toolId = rawId.startsWith("toolu_") ? rawId : `toolu_${rawId}`;
     contentBlocks.push({
       type: "tool_use",
-      id: c.id,
+      id: toolId,
       name: c.name,
       input: c.arguments,
     });

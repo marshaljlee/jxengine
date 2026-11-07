@@ -93,7 +93,8 @@ export async function proxyAnthropicStream(upstreamRes, clientRes, modelName) {
                     for (const tc of delta.tool_calls) {
                         if (tc.function?.name) {
                             activeToolBlockIndex = 1;
-                            activeToolCallId = tc.id || `toolu_${Date.now()}`;
+                            const rawId = tc.id || `toolu_${Date.now()}`;
+                            activeToolCallId = rawId.startsWith("toolu_") ? rawId : `toolu_${rawId}`;
                             activeToolName = tc.function.name;
                             clientRes.write(`event: content_block_start\ndata: ${JSON.stringify({
                                 type: "content_block_start",

@@ -13,6 +13,10 @@ export declare class SlotManager {
      */
     static abortSlot(enginePort: number, slotId?: number): Promise<boolean>;
     /**
+     * Discovers active processing slots on llama-server and aborts all non-idle slots.
+     */
+    static abortAllActiveSlots(enginePort: number): Promise<number>;
+    /**
      * Binds an HTTP request lifecycle to an engine slot, aborting upstream generation if client aborts.
      */
     static bindDisconnect(req: {

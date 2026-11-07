@@ -116,7 +116,8 @@ export async function proxyAnthropicStream(
           for (const tc of delta.tool_calls) {
             if (tc.function?.name) {
               activeToolBlockIndex = 1;
-              activeToolCallId = tc.id || `toolu_${Date.now()}`;
+              const rawId = tc.id || `toolu_${Date.now()}`;
+              activeToolCallId = rawId.startsWith("toolu_") ? rawId : `toolu_${rawId}`;
               activeToolName = tc.function.name;
 
               clientRes.write(
