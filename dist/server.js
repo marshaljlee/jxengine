@@ -30,6 +30,41 @@ export class UniversalGateway {
         const persisted = loadSettings().modelDirs;
         return Array.from(new Set([...(this.config.modelDirs || []), ...persisted]));
     }
+    async resolveTargetInstance(requestedModelId) {
+        const running = this.config.orchestrator.listRunning();
+        if (requestedModelId) {
+            const match = running.find((r) => r.id === requestedModelId || r.model.fileName === requestedModelId || r.model.id === requestedModelId);
+            if (match)
+                return match;
+            // Model requested is not currently running: Attempt hot-spin if model exists
+            const dirs = this.getModelDirs();
+            const ggufModels = await scanDirectoriesForModels(dirs);
+            const mlxCatalog = listKapitsaModels();
+            const mlxCustom = scanMlxDirectories(dirs);
+            const all = [...ggufModels, ...mlxCatalog, ...mlxCustom];
+            const found = all.find((m) => m.id === requestedModelId || m.fileName === requestedModelId);
+            if (found) {
+                const opts = autoConfigureModel(found);
+                return await this.config.orchestrator.launchModel(found, opts);
+            }
+        }
+        // Default to first running instance or default configured model
+        if (running.length > 0)
+            return running[0];
+        if (this.config.defaultModelId) {
+            const dirs = this.getModelDirs();
+            const ggufModels = await scanDirectoriesForModels(dirs);
+            const mlxCatalog = listKapitsaModels();
+            const mlxCustom = scanMlxDirectories(dirs);
+            const all = [...ggufModels, ...mlxCatalog, ...mlxCustom];
+            const found = all.find((m) => m.id === this.config.defaultModelId || m.fileName === this.config.defaultModelId);
+            if (found) {
+                const opts = autoConfigureModel(found);
+                return await this.config.orchestrator.launchModel(found, opts);
+            }
+        }
+        return null;
+    }
     start() {
         return new Promise((resolve, reject) => {
             this.server = createServer(async (req, res) => {
@@ -264,6 +299,12 @@ export class UniversalGateway {
                 if (url.pathname === "/v1/messages" && req.method === "POST") {
                     try {
                         const anthropicBody = await this.readJsonBody(req);
+                        const targetInstance = await this.resolveTargetInstance(anthropicBody.model);
+                        if (!targetInstance) {
+                            res.writeHead(503, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify({ error: `Model not available or loaded: ${anthropicBody.model || "default"}` }));
+                            return;
+                        }
                         const openAiPayload = anthropicToOpenAi(anthropicBody);
                         const isStreaming = Boolean(anthropicBody.stream);
                         // Billion-Context Feature: Tag messages with <acp:m0000X> sequence IDs
@@ -347,19 +388,33 @@ export class UniversalGateway {
                     }
                 }
                 // General OpenAI & Ollama Proxy (e.g. /v1/chat/completions, /v1/embeddings)
-                const targetUrl = `http://127.0.0.1:${targetInstance.port}${req.url}`;
                 try {
                     const bodyBuffer = [];
                     for await (const chunk of req) {
                         bodyBuffer.push(chunk);
                     }
                     const fullBody = Buffer.concat(bodyBuffer);
-                    // Feature 7: Bind client abort to engine slot cancellation
+                    let requestedModel = undefined;
+                    let parsedPayload = null;
+                    if (fullBody.length > 0) {
+                        try {
+                            parsedPayload = JSON.parse(fullBody.toString("utf8"));
+                            requestedModel = parsedPayload.model;
+                        }
+                        catch { }
+                    }
+                    const targetInstance = await this.resolveTargetInstance(requestedModel);
+                    if (!targetInstance) {
+                        res.writeHead(503, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: `No model available or loaded for: ${requestedModel || "default"}` }));
+                        return;
+                    }
+                    const targetUrl = `http://127.0.0.1:${targetInstance.port}${req.url}`;
                     const unbindSlot = SlotManager.bindDisconnect(req, targetInstance.port);
                     let outboundBody = fullBody;
-                    if (["/v1/chat/completions", "/api/chat"].includes(url.pathname) && req.method === "POST" && fullBody.length > 0) {
+                    if (["/v1/chat/completions", "/api/chat"].includes(url.pathname) && req.method === "POST" && parsedPayload) {
                         try {
-                            const parsed = JSON.parse(fullBody.toString("utf8"));
+                            const parsed = parsedPayload;
                             if (parsed.messages && Array.isArray(parsed.messages)) {
                                 // Billion-Context Feature: Tag messages with <acp:m0000X> sequence IDs
                                 const acpSession = this.billionContext.getOrCreateSession(parsed.model || "default");
@@ -394,6 +449,51 @@ export class UniversalGateway {
                     }
                     // Feature 6: Local Embeddings Endpoint handling (/v1/embeddings and /api/embeddings)
                     if (["/v1/embeddings", "/api/embeddings"].includes(url.pathname) && req.method === "POST") {
+                        try {
+                            if (parsedPayload && Array.isArray(parsedPayload.input) && parsedPayload.input.length > 32) {
+                                // Batch-chunking iterator: Prevents upstream batch overflow on large arrays
+                                const chunkSize = 16;
+                                const chunks = [];
+                                for (let i = 0; i < parsedPayload.input.length; i += chunkSize) {
+                                    chunks.push(parsedPayload.input.slice(i, i + chunkSize));
+                                }
+                                const aggregatedData = [];
+                                let totalPromptTokens = 0;
+                                for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
+                                    const subPayload = { ...parsedPayload, input: chunks[cIdx] };
+                                    const subRes = await fetch(targetUrl, {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify(subPayload),
+                                    });
+                                    if (!subRes.ok) {
+                                        throw new Error(`Upstream embedding chunk failed with status ${subRes.status}`);
+                                    }
+                                    const subJson = await subRes.json();
+                                    if (subJson.data && Array.isArray(subJson.data)) {
+                                        subJson.data.forEach((item, itemIdx) => {
+                                            aggregatedData.push({
+                                                ...item,
+                                                index: cIdx * chunkSize + itemIdx,
+                                            });
+                                        });
+                                    }
+                                    if (subJson.usage?.prompt_tokens) {
+                                        totalPromptTokens += subJson.usage.prompt_tokens;
+                                    }
+                                }
+                                unbindSlot();
+                                res.writeHead(200, { "Content-Type": "application/json" });
+                                res.end(JSON.stringify({
+                                    object: "list",
+                                    data: aggregatedData,
+                                    model: parsedPayload.model || targetInstance.model.fileName,
+                                    usage: { prompt_tokens: totalPromptTokens, total_tokens: totalPromptTokens },
+                                }));
+                                return;
+                            }
+                        }
+                        catch { }
                         const upstreamRes = await fetch(targetUrl, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },

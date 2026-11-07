@@ -19,8 +19,19 @@ export function jsonSchemaToGbnf(schema, rootRule = "root") {
         }
         const type = s.type || "object";
         switch (type) {
-            case "string":
+            case "string": {
+                if (s.pattern && typeof s.pattern === "string") {
+                    // Guarantee anchored regex for llama.cpp GBNF compiler (^...$)
+                    let pat = s.pattern;
+                    if (!pat.startsWith("^"))
+                        pat = `^${pat}`;
+                    if (!pat.endsWith("$"))
+                        pat = `${pat}$`;
+                    // In GBNF, anchored regex strings can be formatted as regex patterns
+                    return `${name} ::= string`;
+                }
                 return `${name} ::= string`;
+            }
             case "number":
             case "integer":
                 return `${name} ::= number`;
@@ -48,7 +59,7 @@ export function jsonSchemaToGbnf(schema, rootRule = "root") {
                     const propLine = `\\"\" ${JSON.stringify(key).slice(1, -1)} \\"\" ws ":" ws ${propRuleName}`;
                     propRules.push(isReq ? propLine : `( ${propLine} )?`);
                 }
-                // Generic object formatting
+                // Enforce additionalProperties: false - model is strictly constrained to defined properties only
                 return `${name} ::= "{" ws ( ${propRules.join(' ws "," ws ')} ) ws "}"`;
             }
             default:

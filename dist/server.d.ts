@@ -12,6 +12,7 @@ export declare class UniversalGateway {
     private billionContext;
     constructor(config: GatewayConfig);
     private getModelDirs;
+    private resolveTargetInstance;
     start(): Promise<number>;
     private readJsonBody;
     stop(): void;
