@@ -3,8 +3,14 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntimeOrchestrator, RunningModelInstance } from "./runtime.js";
-import { scanDirectoriesForModels } from "./gguf.js";
-import { listKapitsaModels, scanMlxDirectories } from "./mlx.js";
+import { defaultCatalogService } from "./catalog.js";
+import {
+  formatApiError,
+  ModelNotFoundError,
+  InsufficientMemoryError,
+  NoActiveModelError,
+  InvalidRequestError,
+} from "./errors.js";
 import { anthropicToOpenAi, openAiToAnthropic, AnthropicRequest } from "./anthropic.js";
 import { autoConfigureModel } from "./autoconfig.js";
 import { loadSettings, addModelDirectory, removeModelDirectory } from "./config.js";
@@ -60,11 +66,7 @@ export class UniversalGateway {
 
       // Model requested is not currently running: Attempt hot-spin if model exists
       const dirs = this.getModelDirs();
-      const ggufModels = await scanDirectoriesForModels(dirs);
-      const mlxCatalog = listKapitsaModels();
-      const mlxCustom = scanMlxDirectories(dirs);
-      const all = [...ggufModels, ...mlxCatalog, ...mlxCustom];
-      const found = all.find((m) => m.id === requestedModelId || m.fileName === requestedModelId);
+      const found = await defaultCatalogService.resolveModel(dirs, requestedModelId);
       if (found) {
         const opts = autoConfigureModel(found);
         return await this.config.orchestrator.launchModel(found, opts);
@@ -76,11 +78,7 @@ export class UniversalGateway {
 
     if (this.config.defaultModelId) {
       const dirs = this.getModelDirs();
-      const ggufModels = await scanDirectoriesForModels(dirs);
-      const mlxCatalog = listKapitsaModels();
-      const mlxCustom = scanMlxDirectories(dirs);
-      const all = [...ggufModels, ...mlxCatalog, ...mlxCustom];
-      const found = all.find((m) => m.id === this.config.defaultModelId || m.fileName === this.config.defaultModelId);
+      const found = await defaultCatalogService.resolveModel(dirs, this.config.defaultModelId);
       if (found) {
         const opts = autoConfigureModel(found);
         return await this.config.orchestrator.launchModel(found, opts);
@@ -201,12 +199,7 @@ export class UniversalGateway {
             const manifest = this.survival.loadManifest();
             if (manifest?.activeModel) {
               const dirs = this.getModelDirs();
-              const ggufModels = await scanDirectoriesForModels(dirs);
-              const mlxCatalog = listKapitsaModels();
-              const mlxCustom = scanMlxDirectories(dirs);
-              const found = [...ggufModels, ...mlxCatalog, ...mlxCustom].find(
-                (m) => m.id === manifest.activeModel?.id || m.path === manifest.activeModel?.path
-              );
+              const found = await defaultCatalogService.resolveModel(dirs, manifest.activeModel.id);
               if (found) {
                 const instance = await this.config.orchestrator.launchModel(found, manifest.activeModel.options);
                 if (body.newVersion) this.survival.acknowledgeResurrection(body.newVersion);
@@ -224,8 +217,9 @@ export class UniversalGateway {
             res.end(JSON.stringify({ status: "no_pending_resurrection" }));
             return;
           } catch (err: any) {
-            res.writeHead(500, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err?.message }));
+            const { statusCode, payload } = formatApiError(err);
+            res.writeHead(statusCode, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(payload));
             return;
           }
         }
@@ -314,10 +308,8 @@ export class UniversalGateway {
         // Models list endpoint (OpenAI /v1/models and Ollama /api/tags)
         if (url.pathname === "/v1/models" || url.pathname === "/api/tags") {
           const dirs = this.getModelDirs();
-          const ggufModels = await scanDirectoriesForModels(dirs);
-          const mlxCatalog = listKapitsaModels();
-          const mlxCustom = scanMlxDirectories(dirs);
-          const all = [...ggufModels, ...mlxCatalog, ...mlxCustom];
+          const catalog = await defaultCatalogService.getCatalog(dirs);
+          const all = catalog.all;
 
           if (url.pathname === "/api/tags") {
             const models = all.map((m) => ({
@@ -357,15 +349,9 @@ export class UniversalGateway {
             const body = await this.readJsonBody(req);
             const { modelId, ...overrides } = body;
             const dirs = this.getModelDirs();
-            const ggufModels = await scanDirectoriesForModels(dirs);
-            const mlxCatalog = listKapitsaModels();
-            const mlxCustom = scanMlxDirectories(dirs);
-            const all = [...ggufModels, ...mlxCatalog, ...mlxCustom];
-            const found = all.find((m) => m.id === modelId || m.fileName === modelId);
+            const found = await defaultCatalogService.resolveModel(dirs, modelId);
             if (!found) {
-              res.writeHead(404, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ error: `Model not found: ${modelId}` }));
-              return;
+              throw new ModelNotFoundError(modelId);
             }
             const opts = autoConfigureModel(found, undefined, overrides);
 
@@ -376,12 +362,7 @@ export class UniversalGateway {
               freeSystemRam();
               const recheck = checkMemoryReservation(found.sizeBytes || 0, opts.nCtx || 4096);
               if (!recheck.sufficient && !overrides.forceLoad) {
-                res.writeHead(400, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({
-                  error: `Insufficient RAM reservation. Requires ~${recheck.requiredGb} GB, but only ${recheck.availableGb} GB is currently available. Free up memory or reduce context length.`,
-                  memoryCheck: recheck,
-                }));
-                return;
+                throw new InsufficientMemoryError(recheck.requiredGb, recheck.availableGb);
               }
             }
 
@@ -390,8 +371,9 @@ export class UniversalGateway {
             res.end(JSON.stringify({ status: "ready", port: instance.port, backend: instance.backend, options: opts }));
             return;
           } catch (err: any) {
-            res.writeHead(500, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err?.message }));
+            const { statusCode, payload } = formatApiError(err);
+            res.writeHead(statusCode, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(payload));
             return;
           }
         }
@@ -405,8 +387,9 @@ export class UniversalGateway {
             res.end(JSON.stringify({ success: ok }));
             return;
           } catch (err: any) {
-            res.writeHead(500, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: err?.message }));
+            const { statusCode, payload } = formatApiError(err);
+            res.writeHead(statusCode, { "Content-Type": "application/json" });
+            res.end(JSON.stringify(payload));
             return;
           }
         }
@@ -417,11 +400,7 @@ export class UniversalGateway {
 
         if (!targetInstance && this.config.defaultModelId) {
           const dirs = this.getModelDirs();
-          const ggufModels = await scanDirectoriesForModels(dirs);
-          const mlxCatalog = listKapitsaModels();
-          const mlxCustom = scanMlxDirectories(dirs);
-          const all = [...ggufModels, ...mlxCatalog, ...mlxCustom];
-          const found = all.find((m) => m.id === this.config.defaultModelId || m.fileName === this.config.defaultModelId);
+          const found = await defaultCatalogService.resolveModel(dirs, this.config.defaultModelId);
           if (found) {
             const opts = autoConfigureModel(found);
             targetInstance = await this.config.orchestrator.launchModel(found, opts);
@@ -429,9 +408,7 @@ export class UniversalGateway {
         }
 
         if (!targetInstance) {
-          res.writeHead(503, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "No model loaded. Visit /panel to configure and load one." }));
-          return;
+          throw new NoActiveModelError();
         }
 
         // Anthropic Messages API Translator (/v1/messages)
@@ -723,8 +700,9 @@ export class UniversalGateway {
           unbindSlot();
           res.end();
         } catch (err: any) {
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: `Upstream error: ${err?.message}` }));
+          const { statusCode, payload } = formatApiError(err);
+          res.writeHead(statusCode, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(payload));
         }
       });
 

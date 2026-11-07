@@ -1,17 +1,10 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { scanDirectoriesForModels } from "./gguf.js";
-import { listKapitsaModels, scanMlxDirectories } from "./mlx.js";
 import { ModelRuntimeOrchestrator } from "./runtime.js";
 import { UniversalGateway } from "./server.js";
 import { startStdioBridge } from "./bridge.js";
+import { defaultCatalogService } from "./catalog.js";
+import { getDefaultModelDirs } from "./config.js";
 
-const DEFAULT_DIRS = [
-  join(homedir(), ".ollama", "models"),
-  join(homedir(), "Models"),
-  join(homedir(), "Downloads"),
-  "/Volumes/Hermes/models",
-];
+const DEFAULT_DIRS = getDefaultModelDirs();
 
 export async function runCli(args: string[]) {
   const cmd = args[0] || "help";
@@ -19,12 +12,10 @@ export async function runCli(args: string[]) {
 
   switch (cmd) {
     case "list": {
-      const gguf = await scanDirectoriesForModels(DEFAULT_DIRS);
-      const mlxCat = listKapitsaModels();
-      const mlxCustom = scanMlxDirectories(DEFAULT_DIRS);
-      console.log(`\nDiscovered Models (${gguf.length} GGUF, ${mlxCat.length + mlxCustom.length} MLX):`);
+      const catalog = await defaultCatalogService.getCatalog(DEFAULT_DIRS);
+      console.log(`\nDiscovered Models (${catalog.gguf.length} GGUF, ${catalog.mlx.length} MLX):`);
       console.log("------------------------------------------------------------");
-      for (const m of [...gguf, ...mlxCat, ...mlxCustom]) {
+      for (const m of catalog.all) {
         console.log(`[${m.format.toUpperCase()}] ${m.fileName} (${m.id})`);
         if (m.projector) console.log(`   └─ Vision Projector: ${m.projector}`);
         if (m.imatrix) console.log(`   └─ Importance Matrix: ${m.imatrix}`);

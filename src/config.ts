@@ -11,15 +11,33 @@ export interface JXEngineSettings {
 const CONFIG_DIR = join(homedir(), ".jxengine");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
+export function getDefaultModelDirs(): string[] {
+  const dirs: string[] = [
+    join(homedir(), ".ollama", "models"),
+    join(homedir(), ".cache", "lm-studio", "models"),
+    join(homedir(), "Models"),
+    join(homedir(), "Downloads"),
+    join(homedir(), "Library", "Application Support", "JXEngine", "models"),
+  ];
+
+  if (process.env.JXENGINE_MODELS_PATH) {
+    const customPaths = process.env.JXENGINE_MODELS_PATH.split(":").map((p) => p.trim()).filter(Boolean);
+    dirs.unshift(...customPaths);
+  }
+
+  // Include Hermes volume only if currently mounted
+  if (existsSync("/Volumes/Hermes/models")) {
+    dirs.push("/Volumes/Hermes/models");
+  }
+
+  // Keep unique existing paths or standard directories
+  return Array.from(new Set(dirs));
+}
+
 export function loadSettings(): JXEngineSettings {
   if (!existsSync(CONFIG_FILE)) {
     const defaultSettings: JXEngineSettings = {
-      modelDirs: [
-        join(homedir(), ".ollama", "models"),
-        join(homedir(), "Models"),
-        join(homedir(), "Downloads"),
-        "/Volumes/Hermes/models",
-      ],
+      modelDirs: getDefaultModelDirs(),
       defaultPort: 8080,
     };
     saveSettings(defaultSettings);

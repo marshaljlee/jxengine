@@ -139,3 +139,4 @@ export class UpdateSurvivalManager {
     } catch {}
   }
 }
+

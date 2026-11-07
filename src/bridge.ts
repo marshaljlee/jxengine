@@ -1,7 +1,6 @@
 import { createInterface } from "node:readline";
 import { ModelRuntimeOrchestrator, RunningModelInstance } from "./runtime.js";
-import { scanDirectoriesForModels, ModelDescriptor } from "./gguf.js";
-import { listKapitsaModels, scanMlxDirectories } from "./mlx.js";
+import { defaultCatalogService } from "./catalog.js";
 import { UpdateSurvivalManager } from "./survival.js";
 
 export interface BridgeContext {
@@ -34,22 +33,14 @@ export function startStdioBridge(ctx: BridgeContext) {
 
       switch (method) {
         case "models/list": {
-          const ggufModels = await scanDirectoriesForModels(ctx.modelDirs);
-          const mlxCatalog = listKapitsaModels();
-          const mlxCustom = scanMlxDirectories(ctx.modelDirs);
-          const all = [...ggufModels, ...mlxCatalog, ...mlxCustom];
-          sendResponse(id, { models: all });
+          const catalog = await defaultCatalogService.getCatalog(ctx.modelDirs);
+          sendResponse(id, { models: catalog.all });
           break;
         }
 
         case "models/load": {
           const { modelId, port, options } = params || {};
-          const ggufModels = await scanDirectoriesForModels(ctx.modelDirs);
-          const mlxCatalog = listKapitsaModels();
-          const mlxCustom = scanMlxDirectories(ctx.modelDirs);
-          const found = [...ggufModels, ...mlxCatalog, ...mlxCustom].find(
-            (m) => m.id === modelId || m.fileName === modelId
-          );
+          const found = await defaultCatalogService.resolveModel(ctx.modelDirs, modelId);
           if (!found) {
             sendError(id, -32602, `Model not found: ${modelId}`);
             return;
@@ -58,8 +49,9 @@ export function startStdioBridge(ctx: BridgeContext) {
           sendResponse(id, {
             status: "ready",
             port: instance.port,
+            modelId: instance.id,
+            pid: instance.process?.pid,
             backend: instance.backend,
-            id: instance.id,
           });
           break;
         }
@@ -106,12 +98,7 @@ export function startStdioBridge(ctx: BridgeContext) {
           const survival = ctx.survivalManager || new UpdateSurvivalManager();
           const manifest = survival.loadManifest();
           if (manifest?.activeModel) {
-            const ggufModels = await scanDirectoriesForModels(ctx.modelDirs);
-            const mlxCatalog = listKapitsaModels();
-            const mlxCustom = scanMlxDirectories(ctx.modelDirs);
-            const found = [...ggufModels, ...mlxCatalog, ...mlxCustom].find(
-              (m) => m.id === manifest.activeModel?.id || m.path === manifest.activeModel?.path
-            );
+            const found = await defaultCatalogService.resolveModel(ctx.modelDirs, manifest.activeModel.id);
             if (found) {
               const instance = await ctx.orchestrator.launchModel(found, manifest.activeModel.options);
               if (newVersion) survival.acknowledgeResurrection(newVersion);
