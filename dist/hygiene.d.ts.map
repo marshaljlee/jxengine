@@ -1,0 +1,1 @@
+{"version":3,"file":"hygiene.d.ts","sourceRoot":"","sources":["../src/hygiene.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AAEH,eAAO,MAAM,qBAAqB,EAAE,MAAM,EAmCzC,CAAC;AASF,MAAM,WAAW,iBAAiB;IAChC,YAAY,EAAE,MAAM,CAAC;IACrB,gBAAgB,CAAC,EAAE,MAAM,CAAC;CAC3B;AAED,wBAAgB,qBAAqB,CAAC,OAAO,EAAE,MAAM,GAAG,iBAAiB,CAwBxE"}
