@@ -1,5 +1,6 @@
 import { IncomingMessage, ServerResponse } from "node:http";
 import { sanitizeModelResponse } from "./hygiene.js";
+import { truncateHallucinatedObservation } from "./interceptor.js";
 
 /**
  * Pipes an upstream OpenAI SSE stream (/v1/chat/completions) into
@@ -81,7 +82,8 @@ export async function proxyAnthropicStream(
         // A. Handle text content
         if (delta.content) {
           const { cleanContent } = sanitizeModelResponse(delta.content);
-          if (cleanContent) {
+          const { cleanText, truncated } = truncateHallucinatedObservation(cleanContent);
+          if (cleanText) {
             if (!blockStarted) {
               clientRes.write(
                 `event: content_block_start\ndata: ${JSON.stringify({
@@ -97,9 +99,14 @@ export async function proxyAnthropicStream(
               `event: content_block_delta\ndata: ${JSON.stringify({
                 type: "content_block_delta",
                 index: 0,
-                delta: { type: "text_delta", text: cleanContent },
+                delta: { type: "text_delta", text: cleanText },
               })}\n\n`
             );
+          }
+
+          if (truncated) {
+            // Cut off any further hallucinated output immediately
+            break;
           }
         }
 

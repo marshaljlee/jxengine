@@ -63,12 +63,26 @@ export class ModelRuntimeOrchestrator {
             // Vault Rule 26: KV Cache slot optimization and continuous batching
             "-np", "1", // Single dedicated high-speed slot for low latency
             "--cont-batching",
+            // Feature 2: Rolling KV-Cache Eviction / Context Shift
+            opts.contextShift !== false ? "--context-shift" : "",
+            // Feature 6: Embedding support
+            opts.enableEmbedding ? "--embedding" : "",
             // DRY (Don't Repeat Yourself) Sampler - Prevents infinite text repetition loops
             "--dry-multiplier", "0.8",
             "--dry-base", "1.75",
             "--dry-allowed-length", "2",
             "--dry-penalty-last-n", "-1",
-        ];
+        ].filter(Boolean);
+        // Feature 4: Speculative Decoding (Draft / Target Dual-Engine Pairing)
+        if (opts.draftModelPath) {
+            args.push("-md", opts.draftModelPath);
+            if (opts.draftGPULayers !== undefined) {
+                args.push("-ngld", String(opts.draftGPULayers));
+            }
+            else {
+                args.push("-ngld", "99");
+            }
+        }
         // If model lacks an embedded chat template or needs a specialized agentic tool template, supply one
         if (!model.hasChatTemplate && model.inferredTemplate) {
             const tmplFile = getJinjaTemplateFile(model.inferredTemplate);

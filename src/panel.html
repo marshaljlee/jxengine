@@ -274,6 +274,13 @@
           </label>
         </div>
       </div>
+      <div style="margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--stroke); display: flex; gap: 12px; align-items: center;">
+        <span style="font-size: 11px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase;">Speculative Draft:</span>
+        <input type="text" id="draftModel" placeholder="Optional draft model path (e.g. Qwen2.5-0.5B.gguf)" style="flex: 1; font-family: ui-monospace, monospace; font-size: 11px;">
+        <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; color: var(--ink-soft);">
+          <input type="checkbox" id="contextShift" checked style="width: auto;"> Context Shift
+        </label>
+      </div>
     </div>
 
     <!-- Active Client Access Endpoints -->
@@ -296,12 +303,19 @@
         </div>
         <button class="copy-badge" onclick="copyText('anthropicUrl')">Copy</button>
       </div>
-      <div class="endpoint-card" style="margin-bottom: 0;">
+      <div class="endpoint-card">
         <div>
           <div class="endpoint-k">Ollama API Base URL</div>
           <div class="endpoint-v" id="ollamaUrl">http://127.0.0.1:8080/api</div>
         </div>
         <button class="copy-badge" onclick="copyText('ollamaUrl')">Copy</button>
+      </div>
+      <div class="endpoint-card" style="margin-bottom: 0;">
+        <div>
+          <div class="endpoint-k">Embeddings Endpoint (RAG & Code Search)</div>
+          <div class="endpoint-v" id="embeddingsUrl">http://127.0.0.1:8080/v1/embeddings</div>
+        </div>
+        <button class="copy-badge" onclick="copyText('embeddingsUrl')">Copy</button>
       </div>
     </div>
   </div>
@@ -311,16 +325,23 @@
   let cachedModels = [];
   let runningInstances = [];
 
-  async function updateDoctor() {
-    try {
-      const res = await fetch("/api/doctor");
-      const d = await res.json();
-      const hw = d.hardware;
-      document.getElementById("ramText").textContent = `${d.memoryAssessment.recommendedMaxModelGb.toFixed(0)} / ${hw.totalMemoryGb} GB Budget`;
-      document.getElementById("ramGauge").style.width = `${Math.min(100, (d.memoryAssessment.recommendedMaxModelGb / hw.totalMemoryGb) * 100)}%`;
-      document.getElementById("cpuCoresText").textContent = `${hw.cpuCores} Cores`;
-      document.getElementById("hwChipBadge").textContent = hw.isAppleSilicon ? "Apple Silicon (Metal)" : "x86 CPU";
-    } catch (e) {}
+  function updateDoctor() {
+    const origin = window.location.origin;
+    document.getElementById("openaiUrl").textContent = `${origin}/v1`;
+    document.getElementById("anthropicUrl").textContent = `${origin}/v1/messages`;
+    document.getElementById("ollamaUrl").textContent = `${origin}/api`;
+    document.getElementById("embeddingsUrl").textContent = `${origin}/v1/embeddings`;
+
+    fetch("/api/doctor")
+      .then(r => r.json())
+      .then(d => {
+        const hw = d.hardware;
+        document.getElementById("ramText").textContent = `${d.memoryAssessment.recommendedMaxModelGb.toFixed(0)} / ${hw.totalMemoryGb} GB Budget`;
+        document.getElementById("ramGauge").style.width = `${Math.min(100, (d.memoryAssessment.recommendedMaxModelGb / hw.totalMemoryGb) * 100)}%`;
+        document.getElementById("cpuCoresText").textContent = `${hw.cpuCores} Cores`;
+        document.getElementById("hwChipBadge").textContent = hw.isAppleSilicon ? "Apple Silicon (Metal)" : "x86 CPU";
+      })
+      .catch(() => {});
   }
 
   async function updateStatus() {
@@ -460,12 +481,14 @@
       const nUBatch = parseInt(document.getElementById("ubatch").value, 10);
       const threads = parseInt(document.getElementById("threads").value, 10);
       const flashAttn = document.getElementById("flashAttn").checked;
+      const contextShift = document.getElementById("contextShift")?.checked ?? true;
+      const draftModelPath = document.getElementById("draftModel")?.value.trim() || undefined;
 
       try {
         await fetch("/api/load", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ modelId, ctx, nGPULayers, nBatch, nUBatch, threads, flashAttn }),
+          body: JSON.stringify({ modelId, ctx, nGPULayers, nBatch, nUBatch, threads, flashAttn, contextShift, draftModelPath }),
         });
       } finally {
         btn.disabled = false;

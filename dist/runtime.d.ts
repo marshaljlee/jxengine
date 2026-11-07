@@ -10,6 +10,10 @@ export interface EngineRuntimeOptions {
     threads?: number;
     keepAliveMs?: number;
     llamaServerPath?: string;
+    contextShift?: boolean;
+    enableEmbedding?: boolean;
+    draftModelPath?: string;
+    draftGPULayers?: number;
 }
 export interface RunningModelInstance {
     id: string;

@@ -11,6 +11,11 @@ import { proxyAnthropicStream } from "./stream.js";
 import { applyInstructionGuardrails } from "./guardrails.js";
 import { executeWithRetry, pruneContextToFit } from "./resilience.js";
 import { runPreflightDiagnostics } from "./diagnostics.js";
+import { buildToolCallingGbnf } from "./grammar.js";
+import { compactConversation } from "./compactor.js";
+import { getDynamicStopTokens, truncateHallucinatedObservation } from "./interceptor.js";
+import { isolateHistoricalScratchpads } from "./scratchpad.js";
+import { SlotManager } from "./slots.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export class UniversalGateway {
     config;
@@ -195,6 +200,35 @@ export class UniversalGateway {
                         const anthropicBody = await this.readJsonBody(req);
                         const openAiPayload = anthropicToOpenAi(anthropicBody);
                         const isStreaming = Boolean(anthropicBody.stream);
+                        // Feature 5: Isolate historical scratchpads
+                        if (openAiPayload.messages && Array.isArray(openAiPayload.messages)) {
+                            openAiPayload.messages = isolateHistoricalScratchpads(openAiPayload.messages);
+                        }
+                        // Feature 2: Compact middle context to prevent window overflow
+                        if (openAiPayload.messages && Array.isArray(openAiPayload.messages)) {
+                            const compacted = compactConversation(openAiPayload.messages, { maxContextTokens: 16384 });
+                            openAiPayload.messages = compacted.messages;
+                        }
+                        // Feature 3: Inject dynamic stop tokens when tools exist
+                        const hasTools = Boolean(anthropicBody.tools && anthropicBody.tools.length > 0);
+                        openAiPayload.stop = getDynamicStopTokens(hasTools, openAiPayload.stop);
+                        // Feature 1: GBNF Grammar injection if tools are present
+                        if (hasTools && anthropicBody.tools) {
+                            const formattedTools = anthropicBody.tools.map((t) => ({
+                                type: "function",
+                                function: {
+                                    name: t.name,
+                                    description: t.description,
+                                    parameters: t.input_schema,
+                                },
+                            }));
+                            const grammar = buildToolCallingGbnf(formattedTools);
+                            if (grammar) {
+                                openAiPayload.grammar = grammar;
+                            }
+                        }
+                        // Feature 7: Bind client abort to engine slot cancellation
+                        const unbindSlot = SlotManager.bindDisconnect(req, targetInstance.port);
                         // Vault Rule 3: Auto-retry with backoff on engine connection
                         const upstreamRes = await executeWithRetry(async () => {
                             return await fetch(`http://127.0.0.1:${targetInstance.port}/v1/chat/completions`, {
@@ -204,6 +238,7 @@ export class UniversalGateway {
                             });
                         });
                         if (!upstreamRes.ok) {
+                            unbindSlot();
                             const errText = await upstreamRes.text();
                             res.writeHead(upstreamRes.status, { "Content-Type": "application/json" });
                             res.end(errText);
@@ -211,9 +246,16 @@ export class UniversalGateway {
                         }
                         if (isStreaming) {
                             await proxyAnthropicStream(upstreamRes, res, anthropicBody.model || targetInstance.model.fileName);
+                            unbindSlot();
                             return;
                         }
                         const openAiJson = await upstreamRes.json();
+                        // Feature 3: Non-stream hallucination truncation
+                        if (openAiJson.choices?.[0]?.message?.content) {
+                            const { cleanText } = truncateHallucinatedObservation(openAiJson.choices[0].message.content);
+                            openAiJson.choices[0].message.content = cleanText;
+                        }
+                        unbindSlot();
                         const anthropicResp = openAiToAnthropic(openAiJson, anthropicBody.model || targetInstance.model.fileName);
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(anthropicResp));
@@ -225,7 +267,7 @@ export class UniversalGateway {
                         return;
                     }
                 }
-                // General OpenAI & Ollama Proxy (e.g. /v1/chat/completions)
+                // General OpenAI & Ollama Proxy (e.g. /v1/chat/completions, /v1/embeddings)
                 const targetUrl = `http://127.0.0.1:${targetInstance.port}${req.url}`;
                 try {
                     const bodyBuffer = [];
@@ -233,18 +275,48 @@ export class UniversalGateway {
                         bodyBuffer.push(chunk);
                     }
                     const fullBody = Buffer.concat(bodyBuffer);
+                    // Feature 7: Bind client abort to engine slot cancellation
+                    const unbindSlot = SlotManager.bindDisconnect(req, targetInstance.port);
                     let outboundBody = fullBody;
                     if (["/v1/chat/completions", "/api/chat"].includes(url.pathname) && req.method === "POST" && fullBody.length > 0) {
                         try {
                             const parsed = JSON.parse(fullBody.toString("utf8"));
                             if (parsed.messages && Array.isArray(parsed.messages)) {
+                                // Feature 5: Isolate historical scratchpads
+                                parsed.messages = isolateHistoricalScratchpads(parsed.messages);
+                                // Feature 2: Middle-out compaction
+                                const compacted = compactConversation(parsed.messages, { maxContextTokens: 16384 });
+                                parsed.messages = compacted.messages;
                                 // Rule 7/42: Prune context if window limit exceeded, then apply sandwich guardrails
                                 parsed.messages = pruneContextToFit(parsed.messages);
                                 parsed.messages = applyInstructionGuardrails(parsed.messages);
+                                // Feature 3: Dynamic Stop-Tokens when tools exist
+                                const hasTools = Boolean(parsed.tools && parsed.tools.length > 0);
+                                parsed.stop = getDynamicStopTokens(hasTools, parsed.stop);
+                                // Feature 1: GBNF Grammar conversion if tools are supplied
+                                if (hasTools && parsed.tools) {
+                                    const grammar = buildToolCallingGbnf(parsed.tools);
+                                    if (grammar) {
+                                        parsed.grammar = grammar;
+                                    }
+                                }
                                 outboundBody = JSON.stringify(parsed);
                             }
                         }
                         catch { }
+                    }
+                    // Feature 6: Local Embeddings Endpoint handling (/v1/embeddings and /api/embeddings)
+                    if (["/v1/embeddings", "/api/embeddings"].includes(url.pathname) && req.method === "POST") {
+                        const upstreamRes = await fetch(targetUrl, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: typeof outboundBody === "string" ? outboundBody : new Uint8Array(outboundBody),
+                        });
+                        unbindSlot();
+                        res.writeHead(upstreamRes.status, Object.fromEntries(upstreamRes.headers.entries()));
+                        const buf = await upstreamRes.arrayBuffer();
+                        res.end(Buffer.from(buf));
+                        return;
                     }
                     // Vault Rule 3: Auto-retry with backoff on upstream inference calls
                     const upstreamRes = await executeWithRetry(async () => {
@@ -266,6 +338,7 @@ export class UniversalGateway {
                             res.write(value);
                         }
                     }
+                    unbindSlot();
                     res.end();
                 }
                 catch (err) {
