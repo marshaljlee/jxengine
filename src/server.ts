@@ -19,6 +19,7 @@ import { getDynamicStopTokens, truncateHallucinatedObservation } from "./interce
 import { isolateHistoricalScratchpads } from "./scratchpad.js";
 import { SlotManager } from "./slots.js";
 import { getDetailedMemorySnapshot, freeSystemRam, checkMemoryReservation } from "./memory.js";
+import { BillionContextEngine, ACP_TOOLS_SCHEMA } from "./billion.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +33,7 @@ export interface GatewayConfig {
 
 export class UniversalGateway {
   private server?: ReturnType<typeof createServer>;
+  private billionContext = new BillionContextEngine();
 
   constructor(private config: GatewayConfig) {}
 
@@ -55,6 +57,31 @@ export class UniversalGateway {
         }
 
         const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+
+        // API Endpoint: Billion-Context ACP status
+        if (url.pathname === "/api/billion/status" && req.method === "GET") {
+          const session = this.billionContext.getOrCreateSession("default");
+          const status = this.billionContext.getStatus(session);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(status));
+          return;
+        }
+
+        // API Endpoint: Billion-Context search
+        if (url.pathname === "/api/billion/search" && req.method === "POST") {
+          try {
+            const body = await this.readJsonBody(req);
+            const session = this.billionContext.getOrCreateSession(body.sessionId || "default");
+            const hits = this.billionContext.searchContext(session, body.query || "");
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ query: body.query, hits }));
+            return;
+          } catch (err: any) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err?.message }));
+            return;
+          }
+        }
 
         // API Endpoint: Rule 16 Preflight Diagnostics & Hardware Doctor
         if (url.pathname === "/api/doctor" && req.method === "GET") {
@@ -267,6 +294,21 @@ export class UniversalGateway {
             const openAiPayload: any = anthropicToOpenAi(anthropicBody);
             const isStreaming = Boolean(anthropicBody.stream);
 
+            // Billion-Context Feature: Tag messages with <acp:m0000X> sequence IDs
+            const acpSession = this.billionContext.getOrCreateSession(anthropicBody.model || "default");
+            if (openAiPayload.messages && Array.isArray(openAiPayload.messages)) {
+              openAiPayload.messages = this.billionContext.tagMessages(openAiPayload.messages);
+              acpSession.messages = openAiPayload.messages;
+            }
+
+            // Billion-Context Feature: Inject ACP tools schema (compress, decompress, search_context, acp_status, acp_rule)
+            const baseTools = anthropicBody.tools || [];
+            const mergedTools = [...baseTools, ...ACP_TOOLS_SCHEMA.map(t => ({
+              name: t.function.name,
+              description: t.function.description,
+              input_schema: t.function.parameters,
+            }))];
+
             // Feature 5: Isolate historical scratchpads
             if (openAiPayload.messages && Array.isArray(openAiPayload.messages)) {
               openAiPayload.messages = isolateHistoricalScratchpads(openAiPayload.messages);
@@ -279,12 +321,12 @@ export class UniversalGateway {
             }
 
             // Feature 3: Inject dynamic stop tokens when tools exist
-            const hasTools = Boolean(anthropicBody.tools && anthropicBody.tools.length > 0);
+            const hasTools = mergedTools.length > 0;
             openAiPayload.stop = getDynamicStopTokens(hasTools, openAiPayload.stop);
 
             // Feature 1: GBNF Grammar injection if tools are present
-            if (hasTools && anthropicBody.tools) {
-              const formattedTools = anthropicBody.tools.map((t) => ({
+            if (hasTools) {
+              const formattedTools = mergedTools.map((t: any) => ({
                 type: "function" as const,
                 function: {
                   name: t.name,
@@ -360,6 +402,16 @@ export class UniversalGateway {
             try {
               const parsed = JSON.parse(fullBody.toString("utf8"));
               if (parsed.messages && Array.isArray(parsed.messages)) {
+                // Billion-Context Feature: Tag messages with <acp:m0000X> sequence IDs
+                const acpSession = this.billionContext.getOrCreateSession(parsed.model || "default");
+                parsed.messages = this.billionContext.tagMessages(parsed.messages);
+                acpSession.messages = parsed.messages;
+
+                // Billion-Context Feature: Inject ACP tools schema
+                const baseTools = parsed.tools || [];
+                const mergedTools = [...baseTools, ...ACP_TOOLS_SCHEMA];
+                parsed.tools = mergedTools;
+
                 // Feature 5: Isolate historical scratchpads
                 parsed.messages = isolateHistoricalScratchpads(parsed.messages);
                 // Feature 2: Middle-out compaction

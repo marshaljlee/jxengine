@@ -9,6 +9,7 @@ export interface GatewayConfig {
 export declare class UniversalGateway {
     private config;
     private server?;
+    private billionContext;
     constructor(config: GatewayConfig);
     private getModelDirs;
     start(): Promise<number>;

@@ -250,7 +250,7 @@
     <div class="card">
       <div class="card-head">
         <span class="card-title">Engine Hardware Tuning (Metal Auto-Tuned)</span>
-        <span style="font-size: 11px; color: #3fb950; font-weight: 600;">DRY Sampler + Auto Jinja</span>
+        <span style="font-size: 11px; color: #3fb950; font-weight: 600;">DRY Sampler + Auto Jinja + Billion-Context (ACP)</span>
       </div>
       <div class="grid-params">
         <div>
@@ -322,6 +322,13 @@
         </div>
         <button class="copy-badge" onclick="copyText('embeddingsUrl')">Copy</button>
       </div>
+      <div class="endpoint-card" style="margin-top: 8px; margin-bottom: 0;">
+        <div>
+          <div class="endpoint-k">Billion-Context ACP Status Endpoint</div>
+          <div class="endpoint-v" id="billionUrl">http://127.0.0.1:8080/api/billion/status</div>
+        </div>
+        <button class="copy-badge" onclick="copyText('billionUrl')">Copy</button>
+      </div>
     </div>
   </div>
 </main>
@@ -336,6 +343,7 @@
     document.getElementById("anthropicUrl").textContent = `${origin}/v1/messages`;
     document.getElementById("ollamaUrl").textContent = `${origin}/api`;
     document.getElementById("embeddingsUrl").textContent = `${origin}/v1/embeddings`;
+    document.getElementById("billionUrl").textContent = `${origin}/api/billion/status`;
 
     fetch("/api/doctor")
       .then(r => r.json())
