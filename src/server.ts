@@ -20,6 +20,8 @@ import { isolateHistoricalScratchpads } from "./scratchpad.js";
 import { SlotManager } from "./slots.js";
 import { getDetailedMemorySnapshot, freeSystemRam, checkMemoryReservation } from "./memory.js";
 import { BillionContextEngine, ACP_TOOLS_SCHEMA } from "./billion.js";
+import { injectAmbientContext, executeNativeSystemTool, SYSTEM_TOOLS_SCHEMA } from "./ambient.js";
+import { recordHistoryTurns, loadHistorySession, exportHistoryFormatted } from "./history.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -97,6 +99,38 @@ export class UniversalGateway {
         }
 
         const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
+
+        // API Endpoint: History query & export
+        if (url.pathname === "/api/history") {
+          const sessionId = url.searchParams.get("sessionId") || "default";
+          const format = url.searchParams.get("format") === "txt" ? "txt" : "json";
+          if (req.method === "GET") {
+            const data = exportHistoryFormatted(sessionId, format);
+            res.writeHead(200, { "Content-Type": format === "json" ? "application/json" : "text/plain; charset=utf-8" });
+            res.end(data);
+            return;
+          }
+        }
+
+        // API Endpoint: Execute native OS desktop tool
+        if (url.pathname === "/api/tools/execute" && req.method === "POST") {
+          try {
+            const body = await this.readJsonBody(req);
+            const result = await executeNativeSystemTool(body.name, body.arguments || {});
+            if (result) {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify(result));
+              return;
+            }
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: `Tool ${body.name} not found or unsupported` }));
+            return;
+          } catch (err: any) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err?.message }));
+            return;
+          }
+        }
 
         // API Endpoint: Billion-Context ACP status
         if (url.pathname === "/api/billion/status" && req.method === "GET") {
@@ -341,20 +375,33 @@ export class UniversalGateway {
             const openAiPayload: any = anthropicToOpenAi(anthropicBody);
             const isStreaming = Boolean(anthropicBody.stream);
 
-            // Billion-Context Feature: Tag messages with <acp:m0000X> sequence IDs
+            // Pattern 2: Native OS Context Injection (X-OS-Context or X-Context header)
+            const osContext = (req.headers["x-os-context"] || req.headers["x-context"]) as string | undefined;
+            if (osContext && openAiPayload.messages) {
+              openAiPayload.messages = injectAmbientContext(openAiPayload.messages, osContext);
+            }
+
+            // Billion-Context Feature & Pattern 3 System Tools
             const acpSession = this.billionContext.getOrCreateSession(anthropicBody.model || "default");
             if (openAiPayload.messages && Array.isArray(openAiPayload.messages)) {
               openAiPayload.messages = this.billionContext.tagMessages(openAiPayload.messages);
               acpSession.messages = openAiPayload.messages;
             }
 
-            // Billion-Context Feature: Inject ACP tools schema (compress, decompress, search_context, acp_status, acp_rule)
             const baseTools = anthropicBody.tools || [];
-            const mergedTools = [...baseTools, ...ACP_TOOLS_SCHEMA.map(t => ({
-              name: t.function.name,
-              description: t.function.description,
-              input_schema: t.function.parameters,
-            }))];
+            const mergedTools = [
+              ...baseTools,
+              ...ACP_TOOLS_SCHEMA.map(t => ({
+                name: t.function.name,
+                description: t.function.description,
+                input_schema: t.function.parameters,
+              })),
+              ...SYSTEM_TOOLS_SCHEMA.map(t => ({
+                name: t.function.name,
+                description: t.function.description,
+                input_schema: t.function.parameters,
+              })),
+            ];
 
             // Feature 5: Isolate historical scratchpads
             if (openAiPayload.messages && Array.isArray(openAiPayload.messages)) {
@@ -422,6 +469,18 @@ export class UniversalGateway {
 
             unbindSlot();
             const anthropicResp = openAiToAnthropic(openAiJson as any, anthropicBody.model || targetInstance.model.fileName);
+
+            // Pattern 4: Record history turn for conversation export
+            if (openAiPayload.messages) {
+              const lastUser = openAiPayload.messages.filter((m: any) => m.role === "user").pop();
+              if (lastUser) {
+                recordHistoryTurns(anthropicBody.model || "default", [
+                  { role: "user", content: lastUser.content },
+                  { role: "assistant", content: JSON.stringify(anthropicResp.content), model: anthropicBody.model },
+                ]);
+              }
+            }
+
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify(anthropicResp));
             return;
@@ -464,14 +523,20 @@ export class UniversalGateway {
             try {
               const parsed = parsedPayload;
               if (parsed.messages && Array.isArray(parsed.messages)) {
+                // Pattern 2: Native OS Context Injection (X-OS-Context header or parsed.context)
+                const osContext = ((req.headers["x-os-context"] || req.headers["x-context"]) as string) || parsed.context;
+                if (osContext) {
+                  parsed.messages = injectAmbientContext(parsed.messages, osContext);
+                }
+
                 // Billion-Context Feature: Tag messages with <acp:m0000X> sequence IDs
                 const acpSession = this.billionContext.getOrCreateSession(parsed.model || "default");
                 parsed.messages = this.billionContext.tagMessages(parsed.messages);
                 acpSession.messages = parsed.messages;
 
-                // Billion-Context Feature: Inject ACP tools schema
+                // Billion-Context Feature & Pattern 3 System Tools
                 const baseTools = parsed.tools || [];
-                const mergedTools = [...baseTools, ...ACP_TOOLS_SCHEMA];
+                const mergedTools = [...baseTools, ...ACP_TOOLS_SCHEMA, ...SYSTEM_TOOLS_SCHEMA];
                 parsed.tools = mergedTools;
 
                 // Feature 5: Isolate historical scratchpads

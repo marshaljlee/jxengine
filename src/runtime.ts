@@ -5,6 +5,7 @@ import { ModelDescriptor } from "./gguf.js";
 import { detectKapitsaBinary } from "./mlx.js";
 import { getJinjaTemplateFile } from "./templates.js";
 import { saveSessionState, clearSessionState } from "./recovery.js";
+import { resolveLlamaServerBinary } from "./discovery.js";
 
 export interface EngineRuntimeOptions {
   port?: number;
@@ -91,7 +92,7 @@ export class ModelRuntimeOrchestrator {
     port: number,
     opts: EngineRuntimeOptions
   ): Promise<RunningModelInstance> {
-    const bin = opts.llamaServerPath || "/opt/homebrew/bin/llama-server";
+    const bin = resolveLlamaServerBinary(opts.llamaServerPath);
     const args: string[] = [
       "-m", model.path,
       "--port", String(port),
