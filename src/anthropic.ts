@@ -1,4 +1,4 @@
-import { extractTextualToolCalls } from "./tools.js";
+import { extractTextualToolCalls, generateToolCallId } from "./tools.js";
 import { sanitizeModelResponse } from "./hygiene.js";
 import { applyInstructionGuardrails } from "./guardrails.js";
 import { humanizeOutput } from "./humanizer.js";
@@ -154,7 +154,7 @@ export function openAiToAnthropic(res: Record<string, any>, modelName: string): 
       } else if (typeof tc.function?.arguments === "object" && tc.function?.arguments !== null) {
         args = tc.function.arguments;
       }
-      const rawId = tc.id || `toolu_${Date.now()}`;
+      const rawId = tc.id || generateToolCallId("toolu");
       const toolId = rawId.startsWith("toolu_") ? rawId : `toolu_${rawId}`;
       contentBlocks.push({
         type: "tool_use",
@@ -167,7 +167,7 @@ export function openAiToAnthropic(res: Record<string, any>, modelName: string): 
 
   // Add intercepted textual tool calls
   for (const c of calls) {
-    const rawId = c.id || `toolu_${Date.now()}`;
+    const rawId = c.id || generateToolCallId("toolu");
     const toolId = rawId.startsWith("toolu_") ? rawId : `toolu_${rawId}`;
     contentBlocks.push({
       type: "tool_use",

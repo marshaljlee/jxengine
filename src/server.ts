@@ -714,12 +714,55 @@ export class UniversalGateway {
   }
 
   private async readJsonBody(req: IncomingMessage): Promise<any> {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const str = Buffer.concat(chunks).toString("utf8");
-    return str ? JSON.parse(str) : {};
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let totalLength = 0;
+      const MAX_PAYLOAD_BYTES = 50 * 1024 * 1024; // 50MB protection
+
+      const onData = (chunk: Buffer) => {
+        totalLength += chunk.length;
+        if (totalLength > MAX_PAYLOAD_BYTES) {
+          cleanup();
+          reject(new InvalidRequestError("Request payload exceeds 50MB limit"));
+          return;
+        }
+        chunks.push(chunk);
+      };
+
+      const onEnd = () => {
+        cleanup();
+        try {
+          const str = Buffer.concat(chunks).toString("utf8");
+          resolve(str.trim() ? JSON.parse(str) : {});
+        } catch (err: any) {
+          reject(new InvalidRequestError(`Malformed JSON payload: ${err?.message}`));
+        }
+      };
+
+      const onError = (err: Error) => {
+        cleanup();
+        reject(new InvalidRequestError(`Client request stream error: ${err.message}`));
+      };
+
+      const onClose = () => {
+        if (!req.complete) {
+          cleanup();
+          reject(new InvalidRequestError("Client connection closed before request completed"));
+        }
+      };
+
+      const cleanup = () => {
+        req.off("data", onData);
+        req.off("end", onEnd);
+        req.off("error", onError);
+        req.off("close", onClose);
+      };
+
+      req.on("data", onData);
+      req.on("end", onEnd);
+      req.on("error", onError);
+      req.on("close", onClose);
+    });
   }
 
   stop() {

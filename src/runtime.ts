@@ -67,6 +67,50 @@ export async function waitPortReady(port: number, timeoutMs = 30000): Promise<bo
 
 export class ModelRuntimeOrchestrator {
   private activeInstances = new Map<string, RunningModelInstance>();
+  private static registeredExitHooks = false;
+  private static globalInstancesRef: Map<string, RunningModelInstance> | null = null;
+
+  constructor() {
+    ModelRuntimeOrchestrator.globalInstancesRef = this.activeInstances;
+    this.registerGlobalExitHandlers();
+  }
+
+  private registerGlobalExitHandlers() {
+    if (ModelRuntimeOrchestrator.registeredExitHooks) return;
+    ModelRuntimeOrchestrator.registeredExitHooks = true;
+
+    const cleanupAll = (signal: string) => {
+      const instances = ModelRuntimeOrchestrator.globalInstancesRef;
+      if (instances && instances.size > 0) {
+        for (const [id, inst] of instances.entries()) {
+          if (inst.pid) {
+            try {
+              process.kill(-inst.pid, "SIGKILL");
+            } catch {
+              try {
+                process.kill(inst.pid, "SIGKILL");
+              } catch {}
+            }
+          }
+        }
+        instances.clear();
+      }
+    };
+
+    process.once("SIGINT", () => {
+      cleanupAll("SIGINT");
+      process.exit(0);
+    });
+
+    process.once("SIGTERM", () => {
+      cleanupAll("SIGTERM");
+      process.exit(0);
+    });
+
+    process.once("exit", () => {
+      cleanupAll("exit");
+    });
+  }
 
   async launchModel(
     model: ModelDescriptor,
@@ -239,6 +283,21 @@ export class ModelRuntimeOrchestrator {
           process.kill(inst.pid, "SIGTERM");
         } catch {}
       }
+
+      // Escalation: verify process terminated within 1500ms; if still alive, force SIGKILL
+      const pid = inst.pid;
+      setTimeout(() => {
+        try {
+          // process.kill(pid, 0) tests existence without killing
+          process.kill(pid, 0);
+          // If no error thrown, process is still alive: force kill
+          try {
+            process.kill(-pid, "SIGKILL");
+          } catch {
+            process.kill(pid, "SIGKILL");
+          }
+        } catch {}
+      }, 1500).unref();
     }
     this.activeInstances.delete(id);
     clearSessionState();

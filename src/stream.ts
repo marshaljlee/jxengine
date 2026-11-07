@@ -60,7 +60,8 @@ export async function proxyAnthropicStream(
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
 
-  while (true) {
+  try {
+    while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
@@ -184,6 +185,18 @@ export async function proxyAnthropicStream(
   );
 
   clientRes.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
-  clientRes.end();
+  } catch (streamErr: any) {
+    clientRes.write(
+      `event: error\ndata: ${JSON.stringify({
+        type: "error",
+        error: {
+          type: "api_error",
+          message: streamErr?.message || "Upstream model connection severed during stream",
+        },
+      })}\n\n`
+    );
+  } finally {
+    clientRes.end();
+  }
 }
 

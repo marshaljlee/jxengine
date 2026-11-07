@@ -45,3 +45,4 @@ test("getDefaultModelDirs parameterizes paths and includes standard locations", 
   assert.ok(dirs.length > 0);
   assert.ok(dirs.some((d) => d.includes(".ollama")));
 });
+

@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execSync, execFile } from "node:child_process";
 
 export interface SystemToolResult {
   tool: string;
@@ -116,14 +116,29 @@ export async function executeNativeSystemTool(
     }
     case "open_url": {
       try {
-        const targetUrl = String(args.url || "").trim();
-        if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-          return { tool: name, success: false, output: "Invalid URL protocol. Must start with http:// or https://" };
+        const raw = String(args.url || "").trim();
+        let parsed: URL;
+        try {
+          parsed = new URL(raw);
+        } catch {
+          return { tool: name, success: false, output: "Malformed URL. Please provide a valid web URL." };
         }
+
+        // Whitelist http: and https: protocols only to prevent file:// or shell execution schemes
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          return { tool: name, success: false, output: "Security restriction: Only http:// and https:// URLs are allowed." };
+        }
+
         if (process.platform === "darwin") {
-          execSync(`open "${targetUrl}"`);
+          // Use execFile with explicit array args and "--" delimiter to prevent argument injection
+          await new Promise<void>((resolve, reject) => {
+            execFile("open", ["--", parsed.href], (err) => {
+              if (err) reject(err);
+              else resolve();
+            });
+          });
         }
-        return { tool: name, success: true, output: `Opened ${targetUrl}` };
+        return { tool: name, success: true, output: `Opened ${parsed.href}` };
       } catch (err: any) {
         return { tool: name, success: false, output: `Failed to open URL: ${err?.message}` };
       }

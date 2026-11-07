@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import { ModelRuntimeOrchestrator, RunningModelInstance } from "./runtime.js";
+import { ModelRuntimeOrchestrator } from "./runtime.js";
 import { defaultCatalogService } from "./catalog.js";
 import { UpdateSurvivalManager } from "./survival.js";
 
