@@ -23,6 +23,8 @@ import { BillionContextEngine, ACP_TOOLS_SCHEMA } from "./billion.js";
 import { injectAmbientContext, executeNativeSystemTool, SYSTEM_TOOLS_SCHEMA } from "./ambient.js";
 import { recordHistoryTurns, loadHistorySession, exportHistoryFormatted } from "./history.js";
 
+import { UpdateSurvivalManager } from "./survival.js";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface GatewayConfig {
@@ -31,13 +33,17 @@ export interface GatewayConfig {
   modelDirs?: string[];
   orchestrator: ModelRuntimeOrchestrator;
   defaultModelId?: string;
+  survivalManager?: UpdateSurvivalManager;
 }
 
 export class UniversalGateway {
   private server?: ReturnType<typeof createServer>;
   private billionContext = new BillionContextEngine();
+  private survival: UpdateSurvivalManager;
 
-  constructor(private config: GatewayConfig) {}
+  constructor(private config: GatewayConfig) {
+    this.survival = config.survivalManager || new UpdateSurvivalManager();
+  }
 
   private getModelDirs(): string[] {
     const persisted = loadSettings().modelDirs;
@@ -152,6 +158,73 @@ export class UniversalGateway {
             return;
           } catch (err: any) {
             res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err?.message }));
+            return;
+          }
+        }
+
+        // API Endpoint: Lifecycle & Update Survival Handoff
+        if (url.pathname === "/api/lifecycle/handoff" && req.method === "POST") {
+          try {
+            const body = await this.readJsonBody(req);
+            const running = this.config.orchestrator.listRunning();
+            const target = running[0];
+            const manifest = this.survival.prepareUpdateHandoff(
+              body.appName || "HostApp",
+              body.currentVersion || "1.0.0",
+              target
+                ? {
+                    descriptor: target.model,
+                    port: target.port,
+                    options: {
+                      nCtx: target.model.contextLength,
+                    },
+                  }
+                : undefined,
+              this.config.port,
+              this.getModelDirs()
+            );
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ status: "handoff_ready", manifest }));
+            return;
+          } catch (err: any) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err?.message }));
+            return;
+          }
+        }
+
+        // API Endpoint: Lifecycle & Post-Update Resurrection
+        if (url.pathname === "/api/lifecycle/resurrect" && req.method === "POST") {
+          try {
+            const body = await this.readJsonBody(req);
+            const manifest = this.survival.loadManifest();
+            if (manifest?.activeModel) {
+              const dirs = this.getModelDirs();
+              const ggufModels = await scanDirectoriesForModels(dirs);
+              const mlxCatalog = listKapitsaModels();
+              const mlxCustom = scanMlxDirectories(dirs);
+              const found = [...ggufModels, ...mlxCatalog, ...mlxCustom].find(
+                (m) => m.id === manifest.activeModel?.id || m.path === manifest.activeModel?.path
+              );
+              if (found) {
+                const instance = await this.config.orchestrator.launchModel(found, manifest.activeModel.options);
+                if (body.newVersion) this.survival.acknowledgeResurrection(body.newVersion);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                  status: "resurrected",
+                  modelId: instance.id,
+                  port: instance.port,
+                  survivedUpdatesCount: manifest.survivedUpdatesCount,
+                }));
+                return;
+              }
+            }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ status: "no_pending_resurrection" }));
+            return;
+          } catch (err: any) {
+            res.writeHead(500, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: err?.message }));
             return;
           }

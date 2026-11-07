@@ -2,10 +2,12 @@ import { createInterface } from "node:readline";
 import { ModelRuntimeOrchestrator, RunningModelInstance } from "./runtime.js";
 import { scanDirectoriesForModels, ModelDescriptor } from "./gguf.js";
 import { listKapitsaModels, scanMlxDirectories } from "./mlx.js";
+import { UpdateSurvivalManager } from "./survival.js";
 
 export interface BridgeContext {
   modelDirs: string[];
   orchestrator: ModelRuntimeOrchestrator;
+  survivalManager?: UpdateSurvivalManager;
 }
 
 export function startStdioBridge(ctx: BridgeContext) {
@@ -72,6 +74,57 @@ export function startStdioBridge(ctx: BridgeContext) {
         case "models/status": {
           const running = ctx.orchestrator.listRunning();
           sendResponse(id, { running });
+          break;
+        }
+
+        case "lifecycle/prepareUpdate": {
+          const { appName, currentVersion, gatewayPort } = params || {};
+          const survival = ctx.survivalManager || new UpdateSurvivalManager();
+          const running = ctx.orchestrator.listRunning();
+          const target = running[0];
+          const manifest = survival.prepareUpdateHandoff(
+            appName || "HostApp",
+            currentVersion || "1.0.0",
+            target
+              ? {
+                  descriptor: target.model,
+                  port: target.port,
+                  options: {
+                    nCtx: target.model.contextLength,
+                  },
+                }
+              : undefined,
+            gatewayPort || 8080,
+            ctx.modelDirs
+          );
+          sendResponse(id, { status: "prepared", manifest });
+          break;
+        }
+
+        case "lifecycle/resurrect": {
+          const { newVersion } = params || {};
+          const survival = ctx.survivalManager || new UpdateSurvivalManager();
+          const manifest = survival.loadManifest();
+          if (manifest?.activeModel) {
+            const ggufModels = await scanDirectoriesForModels(ctx.modelDirs);
+            const mlxCatalog = listKapitsaModels();
+            const mlxCustom = scanMlxDirectories(ctx.modelDirs);
+            const found = [...ggufModels, ...mlxCatalog, ...mlxCustom].find(
+              (m) => m.id === manifest.activeModel?.id || m.path === manifest.activeModel?.path
+            );
+            if (found) {
+              const instance = await ctx.orchestrator.launchModel(found, manifest.activeModel.options);
+              if (newVersion) survival.acknowledgeResurrection(newVersion);
+              sendResponse(id, {
+                status: "resurrected",
+                modelId: instance.id,
+                port: instance.port,
+                survivedUpdatesCount: manifest.survivedUpdatesCount,
+              });
+              break;
+            }
+          }
+          sendResponse(id, { status: "no_pending_resurrection" });
           break;
         }
 
