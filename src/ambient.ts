@@ -72,11 +72,20 @@ export function injectAmbientContext<T extends { role: string; content?: any }>(
     const userMsg = messages[lastUserIdx];
     let newContent: any = userMsg.content;
 
+    // Sanitize context string to prevent prompt delimiter escaping
+    const safeCtx = cleanCtx
+      .replace(/<\/active_os_context>/gi, "")
+      .replace(/<\|/g, "")
+      .replace(/\|>/g, "")
+      .slice(0, 500);
+
+    const contextTag = `<active_os_context>${safeCtx}</active_os_context>`;
+
     if (typeof userMsg.content === "string") {
-      newContent = `[Active OS Context: ${cleanCtx}]\n${userMsg.content}`;
+      newContent = `${contextTag}\n${userMsg.content}`;
     } else if (Array.isArray(userMsg.content)) {
       newContent = [
-        { type: "text", text: `[Active OS Context: ${cleanCtx}]` },
+        { type: "text", text: contextTag },
         ...userMsg.content,
       ];
     }
@@ -132,7 +141,7 @@ export async function executeNativeSystemTool(
         if (process.platform === "darwin") {
           // Use execFile with explicit array args and "--" delimiter to prevent argument injection
           await new Promise<void>((resolve, reject) => {
-            execFile("open", ["--", parsed.href], (err) => {
+            execFile("open", ["--", parsed.href], (err: Error | null) => {
               if (err) reject(err);
               else resolve();
             });

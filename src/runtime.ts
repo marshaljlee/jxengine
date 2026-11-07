@@ -122,13 +122,27 @@ export class ModelRuntimeOrchestrator {
       return existing;
     }
 
-    const port = opts.port || (await findFreePort());
+    let port = opts.port || (await findFreePort());
 
-    if (model.format === "gguf") {
-      return this.launchLlamaServer(model, port, opts);
-    } else {
-      return this.launchKapitsa(model, port, opts);
+    // Port collision mitigation: retry up to 3 times on EADDRINUSE
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        if (model.format === "gguf") {
+          return await this.launchLlamaServer(model, port, opts);
+        } else {
+          return await this.launchKapitsa(model, port, opts);
+        }
+      } catch (err: any) {
+        attempts++;
+        if (err?.message?.includes("failed to bind port") && attempts < 3 && !opts.port) {
+          port = await findFreePort();
+          continue;
+        }
+        throw err;
+      }
     }
+    throw new Error(`Failed to bind model runtime after ${attempts} attempts`);
   }
 
   private async launchLlamaServer(

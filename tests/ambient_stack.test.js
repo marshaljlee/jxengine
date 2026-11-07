@@ -17,7 +17,7 @@ test("Feature 2: Ambient OS Context Injection injects active app/context cleanly
   ];
   const injected = injectAmbientContext(messages, "Xcode - AppDelegate.swift:42 (Fatal Error)");
   assert.equal(injected.length, 2);
-  assert.ok(injected[1].content.includes("[Active OS Context: Xcode - AppDelegate.swift:42 (Fatal Error)]"));
+  assert.ok(injected[1].content.includes("<active_os_context>Xcode - AppDelegate.swift:42 (Fatal Error)</active_os_context>"));
   assert.ok(injected[1].content.includes("Summarize this bug."));
 });
 

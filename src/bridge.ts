@@ -27,10 +27,17 @@ export function startStdioBridge(ctx: BridgeContext) {
   rl.on("line", async (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
+    let msg: any;
     try {
-      const msg = JSON.parse(trimmed);
-      const { id, method, params } = msg;
+      msg = JSON.parse(trimmed);
+    } catch (parseErr: any) {
+      sendError(null, -32700, `Parse error: ${parseErr.message}`);
+      return;
+    }
 
+    const { id, method, params } = msg;
+
+    try {
       switch (method) {
         case "models/list": {
           const catalog = await defaultCatalogService.getCatalog(ctx.modelDirs);
@@ -40,6 +47,10 @@ export function startStdioBridge(ctx: BridgeContext) {
 
         case "models/load": {
           const { modelId, port, options } = params || {};
+          if (!modelId) {
+            sendError(id, -32602, "Invalid params: 'modelId' is required");
+            return;
+          }
           const found = await defaultCatalogService.resolveModel(ctx.modelDirs, modelId);
           if (!found) {
             sendError(id, -32602, `Model not found: ${modelId}`);
@@ -58,6 +69,10 @@ export function startStdioBridge(ctx: BridgeContext) {
 
         case "models/unload": {
           const { modelId } = params || {};
+          if (!modelId) {
+            sendError(id, -32602, "Invalid params: 'modelId' is required");
+            return;
+          }
           const ok = await ctx.orchestrator.unloadModel(modelId);
           sendResponse(id, { success: ok });
           break;
@@ -120,7 +135,7 @@ export function startStdioBridge(ctx: BridgeContext) {
           break;
       }
     } catch (err: any) {
-      sendError(null, -32700, err?.message || "Parse error");
+      sendError(id, -32603, `Internal error: ${err?.message || "Execution failed"}`);
     }
   });
 }
