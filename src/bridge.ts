@@ -39,6 +39,104 @@ export function startStdioBridge(ctx: BridgeContext) {
 
     try {
       switch (method) {
+        case "initialize": {
+          sendResponse(id, {
+            protocolVersion: "2024-11-05",
+            capabilities: {
+              tools: {},
+            },
+            serverInfo: {
+              name: "jxengine",
+              version: "1.0.0",
+            },
+          });
+          break;
+        }
+
+        case "tools/list": {
+          sendResponse(id, {
+            tools: [
+              {
+                name: "models_list",
+                description: "List all discovered local GGUF and MLX models",
+                inputSchema: { type: "object", properties: {} },
+              },
+              {
+                name: "models_status",
+                description: "Query currently running local models and their ports",
+                inputSchema: { type: "object", properties: {} },
+              },
+              {
+                name: "models_load",
+                description: "Load an LLM into memory with automatic GPU offloading",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    modelId: { type: "string", description: "File name or model ID to load" },
+                  },
+                  required: ["modelId"],
+                },
+              },
+              {
+                name: "models_unload",
+                description: "Unload a running model and free system memory",
+                inputSchema: {
+                  type: "object",
+                  properties: {
+                    modelId: { type: "string", description: "Model ID or file name to unload" },
+                  },
+                  required: ["modelId"],
+                },
+              },
+            ],
+          });
+          break;
+        }
+
+        case "tools/call": {
+          const { name, arguments: toolArgs } = params || {};
+          if (name === "models_list") {
+            const catalog = await defaultCatalogService.getCatalog(ctx.modelDirs);
+            sendResponse(id, {
+              content: [{ type: "text", text: JSON.stringify(catalog.all, null, 2) }],
+            });
+            break;
+          }
+          if (name === "models_status") {
+            const running = ctx.orchestrator.listRunning();
+            sendResponse(id, {
+              content: [{ type: "text", text: JSON.stringify({ running }, null, 2) }],
+            });
+            break;
+          }
+          if (name === "models_load") {
+            const modelId = toolArgs?.modelId;
+            const found = await defaultCatalogService.resolveModel(ctx.modelDirs, modelId);
+            if (!found) {
+              sendResponse(id, {
+                isError: true,
+                content: [{ type: "text", text: `Model not found: ${modelId}` }],
+              });
+              break;
+            }
+            const instance = await ctx.orchestrator.launchModel(found);
+            sendResponse(id, {
+              content: [{ type: "text", text: `Model ${instance.id} ready on port ${instance.port}` }],
+            });
+            break;
+          }
+          if (name === "models_unload") {
+            const modelId = toolArgs?.modelId;
+            const ok = await ctx.orchestrator.unloadModel(modelId);
+            sendResponse(id, {
+              content: [{ type: "text", text: `Model ${modelId} unloaded: ${ok}` }],
+            });
+            break;
+          }
+          sendError(id, -32601, `Unknown tool: ${name}`);
+          break;
+        }
+
         case "models/list": {
           const catalog = await defaultCatalogService.getCatalog(ctx.modelDirs);
           sendResponse(id, { models: catalog.all });
