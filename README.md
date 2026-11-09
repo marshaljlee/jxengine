@@ -38,11 +38,21 @@ Universal, modular local LLM inference gateway and orchestrator built for Apple 
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/jxengine.git
+git clone https://github.com/marshaljlee/jxengine.git
 cd jxengine
 npm install
 npm run build
 ```
+
+---
+
+## Invariant Integration & Installation Mandate (Rule 067)
+
+`jxengine` is designed as a foundational engine module. When building or integrating `jxengine` into a host application, wrapper, or plugin:
+
+1. **Exact Repo Identity:** `jxengine` must be installed exactly as it is in the repository folder, nothing more and nothing less. All source files, test suites, design tokens, documentation, icons, and configuration files must be retained.
+2. **Pipeliner Protocol Enforcement:** Automated integrations must execute via the canonical Pipeliner state machine (`250 - JXEngine Exact Zero-Deviation Module Installation & Customization Pipeline v1.0.md`).
+3. **Sequential Quality Gate:** All 39 unit tests (`npm test`) must pass on the initial baseline before any downstream customization, host routing, or theme overrides are permitted. Customization is unlocked only after bit-for-bit baseline verification.
 
 ### Run Tests
 
