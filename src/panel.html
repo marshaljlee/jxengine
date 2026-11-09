@@ -274,7 +274,12 @@ unicode: "eaad"
       </div>
       <ul class="dir-list" id="dirsList"></ul>
       <div style="display: flex; gap: 6px;">
-        <input type="text" id="newDirInput" placeholder="Add directory path...">
+        <input type="text" id="newDirInput" placeholder="Enter directory path...">
+        <button class="btn sm" onclick="pickDirectory()" title="Choose Folder via macOS Dialog">
+          <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2" />
+          </svg> Browse...
+        </button>
         <button class="btn primary sm" onclick="addDirectory()"><!--
 tags: [directory, dir, files, add, new, create, insert, archive, project, more, folder, plus]
 category: Document
@@ -571,6 +576,19 @@ unicode: "eade"
     input.value = "";
     await loadDirs();
     await refreshModels();
+  }
+
+  async function pickDirectory() {
+    try {
+      const res = await fetch("/api/dirs/pick", { method: "POST" });
+      const data = await res.json();
+      if (data.path) {
+        await loadDirs();
+        await refreshModels();
+      }
+    } catch (e) {
+      console.error("Failed to pick directory:", e);
+    }
   }
 
   async function removeDirectory(encodedDir) {

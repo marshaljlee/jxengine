@@ -1,6 +1,8 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { ModelRuntimeOrchestrator, RunningModelInstance } from "./runtime.js";
 import { defaultCatalogService } from "./catalog.js";
@@ -283,6 +285,32 @@ export class UniversalGateway {
           if (existsSync(panelPath)) {
             res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
             res.end(readFileSync(panelPath, "utf8"));
+            return;
+          }
+        }
+
+        // Browse / Pick Directory Dialog API (macOS native file picker)
+        if (url.pathname === "/api/dirs/pick" && req.method === "POST") {
+          try {
+            if (process.platform === "darwin") {
+              const execAsync = promisify(exec);
+              const script = 'osascript -e \'set chosenFolder to POSIX path of (choose folder with prompt "Select Model Folder")\' -e \'return chosenFolder\'';
+              const { stdout } = await execAsync(script);
+              const selectedPath = stdout.trim().replace(/\/$/, "");
+              if (selectedPath) {
+                const updated = addModelDirectory(selectedPath);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ path: selectedPath, dirs: updated }));
+                return;
+              }
+            }
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ path: null, dirs: this.getModelDirs() }));
+            return;
+          } catch (err: any) {
+            // User cancelled folder picker
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ path: null, cancelled: true, dirs: this.getModelDirs() }));
             return;
           }
         }
