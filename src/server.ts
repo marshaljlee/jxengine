@@ -405,23 +405,6 @@ export class UniversalGateway {
           }
         }
 
-        // Ensure active model instance
-        const running = this.config.orchestrator.listRunning();
-        let targetInstance = running[0];
-
-        if (!targetInstance && this.config.defaultModelId) {
-          const dirs = this.getModelDirs();
-          const found = await defaultCatalogService.resolveModel(dirs, this.config.defaultModelId);
-          if (found) {
-            const opts = autoConfigureModel(found);
-            targetInstance = await this.config.orchestrator.launchModel(found, opts);
-          }
-        }
-
-        if (!targetInstance) {
-          throw new NoActiveModelError();
-        }
-
         // Anthropic Messages API Translator (/v1/messages)
         if (url.pathname === "/v1/messages" && req.method === "POST") {
           try {
@@ -613,8 +596,8 @@ export class UniversalGateway {
                 const hasTools = Boolean(parsed.tools && parsed.tools.length > 0);
                 parsed.stop = getDynamicStopTokens(hasTools, parsed.stop);
 
-                // Feature 1: GBNF Grammar conversion if tools are supplied
-                if (hasTools && parsed.tools) {
+                // GBNF Grammar conversion: Only if grammar is explicitly requested or when not passing native tools (llama-server rejects grammar with tools)
+                if (hasTools && parsed.tools && !parsed.tools) {
                   const grammar = buildToolCallingGbnf(parsed.tools);
                   if (grammar) {
                     parsed.grammar = grammar;

@@ -168,7 +168,7 @@ export class ModelRuntimeOrchestrator {
       "--dry-multiplier", "0.8",
       "--dry-base", "1.75",
       "--dry-allowed-length", "2",
-      "--dry-penalty-last-n", "-1",
+      "--dry-penalty-last-n", "64",
     ].filter(Boolean);
 
     // Feature 4: Speculative Decoding (Draft / Target Dual-Engine Pairing)
@@ -187,7 +187,7 @@ export class ModelRuntimeOrchestrator {
       args.push("--chat-template-file", tmplFile);
     }
 
-    if (opts.flashAttn !== false) args.push("-fa");
+    if (opts.flashAttn !== false) args.push("-fa", "on");
     if (opts.nGPULayers !== undefined) args.push("-ngl", String(opts.nGPULayers));
     else args.push("-ngl", "99"); // default offload all to Metal on Mac
     if (opts.nBatch) args.push("-b", String(opts.nBatch));

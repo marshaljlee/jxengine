@@ -158,20 +158,14 @@ export function findMatchingSidecar(
   const modelBase = basename(modelPath, extname(modelPath)).toLowerCase();
   const dir = dirname(modelPath);
 
-  // Exact base match first, then pattern match
+  // Exact base match only - do not attach arbitrary projector to un-matching models
   for (const file of dirFiles) {
     const fLower = file.toLowerCase();
     if (pattern.test(fLower)) {
-      if (fLower.includes(modelBase) || modelBase.includes(fLower.replace(/\.gguf|\.dat/g, ""))) {
+      const stripped = fLower.replace(/\.gguf|\.dat|\.imatrix/g, "").replace(/^mmproj-|^imatrix-/, "");
+      if (modelBase.includes(stripped) || stripped.includes(modelBase)) {
         return join(dir, file);
       }
-    }
-  }
-
-  // Fallback: any file matching pattern in directory
-  for (const file of dirFiles) {
-    if (pattern.test(file.toLowerCase())) {
-      return join(dir, file);
     }
   }
 
