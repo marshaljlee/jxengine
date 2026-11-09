@@ -168,6 +168,19 @@
     transition: all 150ms ease;
   }
   .copy-badge:hover { color: var(--ink); border-color: var(--stroke-strong); }
+
+  /* Host App Settings Tab / Embedded Mode */
+  body.embedded-tab, body.settings-tab {
+    background: transparent;
+  }
+  body.embedded-tab .topbar, body.settings-tab .topbar {
+    display: none;
+  }
+  body.embedded-tab .canvas-container, body.settings-tab .canvas-container {
+    padding: 12px 16px;
+    max-width: 100%;
+  }
+
 </style>
 </head>
 <body>
@@ -740,6 +753,18 @@ unicode: "eade"
   loadDirs();
   refreshModels();
   setInterval(updateStatus, 3000);
+
+  // Detect if loaded in a host application settings tab / iframe / webview
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('tab') === '1' || urlParams.get('settings') === '1' || urlParams.get('embed') === '1' || window.self !== window.top) {
+    document.body.classList.add('settings-tab', 'embedded-tab');
+  }
+  window.addEventListener('message', (e) => {
+    if (e.data && (e.data.type === 'JXENGINE_SET_TAB_MODE' || e.data.settingsTab === true)) {
+      document.body.classList.add('settings-tab', 'embedded-tab');
+    }
+  });
+
 </script>
 </body>
 </html>

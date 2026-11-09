@@ -51,8 +51,9 @@ npm run build
 `jxengine` is designed as a foundational engine module. When building or integrating `jxengine` into a host application, wrapper, or plugin:
 
 1. **Exact Repo Identity:** `jxengine` must be installed exactly as it is in the repository folder, nothing more and nothing less. All source files, test suites, design tokens, documentation, icons, and configuration files must be retained.
-2. **Pipeliner Protocol Enforcement:** Automated integrations must execute via the canonical Pipeliner state machine (`250 - JXEngine Exact Zero-Deviation Module Installation & Customization Pipeline v1.0.md`).
-3. **Sequential Quality Gate:** All 39 unit tests (`npm test`) must pass on the initial baseline before any downstream customization, host routing, or theme overrides are permitted. Customization is unlocked only after bit-for-bit baseline verification.
+2. **Dedicated Settings Tab:** When an app integrates or installs `jxengine`, it must set `jxengine` into a dedicated settings tab of its own. The tab embeds `jxengine`'s management panel directly (supporting `?tab=1` and iframe/webview messaging), giving the user direct access to local model discovery, memory controls, and API endpoints inside host app preferences.
+3. **Pipeliner Protocol Enforcement:** Automated integrations must execute via the canonical Pipeliner state machine (`250 - JXEngine Exact Zero-Deviation Module Installation & Customization Pipeline v1.0.md`).
+4. **Sequential Quality Gate:** All 39 unit tests (`npm test`) must pass on the initial baseline before any downstream customization, host routing, or theme overrides are permitted. Customization is unlocked only after bit-for-bit baseline verification.
 
 ### Run Tests
 
